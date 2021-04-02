@@ -71,7 +71,7 @@ const config = {
 };
 
 // Create msal application object
-const cca = new ConfidentialClientApplication(config);
+//const cca = new ConfidentialClientApplication(config);
 
 // Create Express App and Routes
 const app = express();
