@@ -1,36 +1,40 @@
 
-import { ConfidentialClientApplication } from '@azure/msal-node';
-import jwt = require('jsonwebtoken');
-import jwksClient = require('jwks-rsa');
-//import https from 'https';
-import { BlobServiceClient } from "@azure/storage-blob";
+import jwt from 'jsonwebtoken';
+import msalNode from '@azure/msal-node';
+import jwksRsa from 'jwks-rsa';
+import https from 'https';
+import storageBlob from "@azure/storage-blob";
+import { SecretClient} from "@azure/keyvault-secrets";
 import {
     AzureCliCredential,
     ChainedTokenCredential,
     ManagedIdentityCredential,
     VisualStudioCodeCredential
 } from "@azure/identity";
-import express = require('express');
-import { CosmosClient, Container, Item } from "@azure/cosmos";
+import express from 'express';
+import { CosmosClient} from "@azure/cosmos";
 
 
 const SERVER_PORT = process.env.PORT || 8000;
 const jwtKeyDiscoveryEndpoint = "https://login.microsoftonline.com/common/discovery/keys";
-const cosmosEndpoint = "https://msi-auth-test.documents.azure.com";
+const cosmosEndpoint = "https://cm-cosmos-demo.documents.azure.com";
 const storageEndpoint = "https://storageaccountident9234.blob.core.windows.net/";
+const keyVaultEndpoint = "https://cm-kv-demo.vault.azure.net/";
 const credential = new ChainedTokenCredential(
     new AzureCliCredential(),
     new VisualStudioCodeCredential(),
     new ManagedIdentityCredential()
 );
-let accessToken;
 
-const storageAccount = new BlobServiceClient(
+let accessToken;
+const clientSecret = await getClientSecretFromKV();
+
+const storageAccount = new storageBlob.BlobServiceClient(
     storageEndpoint,
     credential
 );
 
-const cosmosClient = new CosmosClient({ 
+const cosmosClient = new CosmosClient ({ 
     endpoint: cosmosEndpoint, 
     aadCredentials: credential 
 });
@@ -59,7 +63,7 @@ const validateJwt = (req, res, next) => {
 };
 
 const getSigningKeys = (header, callback) => {
-    var client = jwksClient({
+    var client = new jwksRsa.JwksClient({
         jwksUri: jwtKeyDiscoveryEndpoint
     });
 
@@ -79,32 +83,32 @@ function confirmRequestHasTheRightScope(scopes:Array<string>): boolean{
     return true;
 }
 
-// Before running the sample, you will need to replace the values in the config, 
-// including the clientSecret
 const config = {
     auth: {
         clientId: "c7639087-cb59-4011-88ed-5d535bafc525",
         tenantId: "e801a3ad-3690-4aa0-a142-1d77cb360b07",
         authority: "https://login.microsoftonline.com/e801a3ad-3690-4aa0-a142-1d77cb360b07",
+        clientSecret: clientSecret.value
     }
 };
 
 // Create msal application object
-const cca = new ConfidentialClientApplication(config);
+const cca = new msalNode.ConfidentialClientApplication(config);
 
 // Create Express App and Routes
 const app = express();
 
 app.get('/', (req, res)=>{
     var data = {
-        "endpoint1": "/liststorageblobs",
-        "endpoint2": "/getvolcanodata?volcanoname=<name>",
-        "endpoint3": "/getCosmosData"
+        "endpoint1": "/blobstorage",
+        "endpoint2": "/volcano?volcanoname=<name>",
+        "endpoint3": "/cosmos",
+        "endpoint4": "/graph"
     };
     res.send(data); 
 })
 
-app.get('/liststorageblobs', validateJwt, async (req, res) => {
+app.get('/blobstorage', validateJwt, async (req, res) => {
     const scopes: Array<string> = ["access_as_reader"];
     if(!confirmRequestHasTheRightScope(scopes)){
         res.status(403).send("Missing or invalid scopes");
@@ -113,17 +117,54 @@ app.get('/liststorageblobs', validateJwt, async (req, res) => {
     res.send(data);
 });
 
-app.get('/getCosmosData', async (req, res) => {
+app.get('/cosmos', async (req, res) => {
     const data = await getCosmosData();
     res.send(data);
 });
 
-app.get('/getVolcanoData', async(req, res)=> {
+app.get('/volcano',validateJwt, async(req, res)=> {
     const data = await getVolcanoDataByName(req.query.volcanoname.toString());
     res.send(data);
 });
 
+app.get("/graph", validateJwt, (req, res)=>{
+    const authHeader = req.headers.authorization;
+
+    const oboRequest = {
+        oboAssertion: authHeader.split(' ')[1],
+        scopes: ["user.read"],
+    }
+
+    cca.acquireTokenOnBehalfOf(oboRequest).then((response) => {
+        getGraphData(response.accessToken, (graphResponse)=> {
+            res.status(200).send(graphResponse);
+        });
+    }).catch((error) => {
+        res.status(500).send(error);
+    });
+});
+
 app.listen(SERVER_PORT, () => console.log(`Secure Node Web API listening on port ${SERVER_PORT}!`))
+
+const getGraphData= (accessToken:string, callback:any) => {
+    const options = {
+        method: 'GET',
+        headers: {
+            'Authorization': 'Bearer ' + accessToken,
+        }
+    };
+
+    const req = https.request("https://graph.microsoft.com/v1.0/me", options, (res) => {
+        res.setEncoding('utf8');
+        res.on('data', (responseData) => {
+            callback(responseData);
+        });
+    });
+    req.on('error', (err) => {
+        console.error(err);
+    });
+    req.end();
+}
 
 async function getStorageData(): Promise<Array<string>> {
     const containerClient = storageAccount.getContainerClient("test");
@@ -168,4 +209,9 @@ async function getCosmosData(): Promise<Array<any>> {
         console.error(error);
     }
     return [];
+};
+
+async function getClientSecretFromKV() {
+    const client = new SecretClient(keyVaultEndpoint, credential);
+    return await client.getSecret("clientSecret");
 };

@@ -8,12 +8,14 @@
   },
   "author": "",
   "license": "ISC",
+  "type": "module",
   "dependencies": {
-    "@azure/cosmos": "^3.10.5",
+    "@azure/cosmos":"^3.14.1",
     "@azure/identity": "^1.2.5",
     "@azure/msal-node": "^1.0.1",
     "@azure/storage-blob": "^12.5.0",
-    "express": "^4.17.1",
+    "@azure/keyvault-secrets": "^4.3.0",
+    "express": "latest",
     "jsonwebtoken": "^8.5.1",
     "jwks-rsa": "^1.8.1",
     "uuid": "^8.3.1"
