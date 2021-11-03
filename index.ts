@@ -8,8 +8,7 @@ import { SecretClient} from "@azure/keyvault-secrets";
 import {
     AzureCliCredential,
     ChainedTokenCredential,
-    ManagedIdentityCredential,
-    VisualStudioCodeCredential
+    ManagedIdentityCredential
 } from "@azure/identity";
 import express from 'express';
 import { CosmosClient} from "@azure/cosmos";
@@ -18,12 +17,11 @@ import { CosmosClient} from "@azure/cosmos";
 const SERVER_PORT = process.env.PORT || 8000;
 const jwtKeyDiscoveryEndpoint = "https://login.microsoftonline.com/common/discovery/keys";
 const cosmosEndpoint = "https://cm-cosmos-demo.documents.azure.com";
-const storageEndpoint = "https://storageaccountident9234.blob.core.windows.net/";
-const keyVaultEndpoint = "https://cm-kv-demo.vault.azure.net/";
+const storageEndpoint = "https://cmdemo20210224.blob.core.windows.net/";
+const keyVaultEndpoint = "https://cm-identity-kv.vault.azure.net/";
 const credential = new ChainedTokenCredential(
-    new AzureCliCredential(),
-    new VisualStudioCodeCredential(),
-    new ManagedIdentityCredential()
+    new ManagedIdentityCredential(),
+    new AzureCliCredential()
 );
 
 let accessToken;
@@ -167,7 +165,7 @@ const getGraphData= (accessToken:string, callback:any) => {
 }
 
 async function getStorageData(): Promise<Array<string>> {
-    const containerClient = storageAccount.getContainerClient("test");
+    const containerClient = storageAccount.getContainerClient("sample-data");
     let data: Array<string> = [];
     try {
         let blobs = containerClient.listBlobsFlat();
