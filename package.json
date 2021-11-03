@@ -6,21 +6,17 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
+  "author": "Christos Matskas",
   "license": "ISC",
   "type": "module",
   "dependencies": {
-    "@azure/cosmos":"^3.14.1",
-    "@azure/identity": "^1.2.5",
+    "@azure/cosmos": "^3.14.1",
+    "@azure/identity": "^2.0.1",
+    "@azure/keyvault-secrets": "^4.3.0",
     "@azure/msal-node": "^1.0.1",
     "@azure/storage-blob": "^12.5.0",
-    "@azure/keyvault-secrets": "^4.3.0",
+    "aws-jwt-verify": "^1.0.3",
     "express": "latest",
-    "jsonwebtoken": "^8.5.1",
-    "jwks-rsa": "^1.8.1",
     "uuid": "^8.3.1"
-  },
-  "devDependencies": {
-    "@types/jsonwebtoken": "^8.5.1"
   }
 }

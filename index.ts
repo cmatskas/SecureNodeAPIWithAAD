@@ -1,10 +1,8 @@
-
-import jwt from 'jsonwebtoken';
-import msalNode from '@azure/msal-node';
-import jwksRsa from 'jwks-rsa';
+import msalNode, { OnBehalfOfRequest } from '@azure/msal-node';
 import https from 'https';
 import storageBlob from "@azure/storage-blob";
 import { SecretClient} from "@azure/keyvault-secrets";
+import { JwtRsaVerifier } from "aws-jwt-verify";
 import {
     AzureCliCredential,
     ChainedTokenCredential,
@@ -19,6 +17,8 @@ const jwtKeyDiscoveryEndpoint = "https://login.microsoftonline.com/common/discov
 const cosmosEndpoint = "https://cm-cosmos-demo.documents.azure.com";
 const storageEndpoint = "https://cmdemo20210224.blob.core.windows.net/";
 const keyVaultEndpoint = "https://cm-identity-kv.vault.azure.net/";
+const readOnlyScope: Array<string> = ["access_as_reader"];
+const cosmosScope: Array<string> = ["access_cosmos_data"];
 const credential = new ChainedTokenCredential(
     new ManagedIdentityCredential(),
     new AzureCliCredential()
@@ -32,43 +32,43 @@ const storageAccount = new storageBlob.BlobServiceClient(
     credential
 );
 
+const config = {
+    auth: {
+        clientId: "c7639087-cb59-4011-88ed-5d535bafc525",
+        tenantId: "e801a3ad-3690-4aa0-a142-1d77cb360b07",
+        authority: "https://login.microsoftonline.com/e801a3ad-3690-4aa0-a142-1d77cb360b07",
+        clientSecret: clientSecret.value
+    }
+};
+
+const verifier = JwtRsaVerifier.create({
+    issuer: `${config.auth.authority}/v2.0`,
+    audience: config.auth.clientId,
+    jwksUri: jwtKeyDiscoveryEndpoint
+  });
+
 const cosmosClient = new CosmosClient ({ 
     endpoint: cosmosEndpoint, 
     aadCredentials: credential 
 });
 
-const validateJwt = (req, res, next) => {
+const validateJwt = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     if (authHeader) {
         const token = authHeader.split(' ')[1];
 
-        const validationOptions = {
-            audience: config.auth.clientId,
-            issuer: `${config.auth.authority}/v2.0`
-        }
-
-        jwt.verify(token, getSigningKeys, validationOptions, (err, payload) => {
+        try {
+            const payload = await verifier.verify(token);
+            console.info("Token is valid.");
             accessToken = payload;
-            if (err) {
-                console.log(err);
-                return res.sendStatus(403);
-            }
             next();
-        });
+        } catch {
+            console.error("Token not valid!");
+            return res.sendStatus(401);
+        }
     } else {
         res.sendStatus(401);
     }
-};
-
-const getSigningKeys = (header, callback) => {
-    var client = new jwksRsa.JwksClient({
-        jwksUri: jwtKeyDiscoveryEndpoint
-    });
-
-    client.getSigningKey(header.kid, function (err, key) {
-        var signingKey = key.getPublicKey();
-        callback(null, signingKey);
-    });
 };
 
 function confirmRequestHasTheRightScope(scopes:Array<string>): boolean{
@@ -80,15 +80,6 @@ function confirmRequestHasTheRightScope(scopes:Array<string>): boolean{
     });
     return true;
 }
-
-const config = {
-    auth: {
-        clientId: "c7639087-cb59-4011-88ed-5d535bafc525",
-        tenantId: "e801a3ad-3690-4aa0-a142-1d77cb360b07",
-        authority: "https://login.microsoftonline.com/e801a3ad-3690-4aa0-a142-1d77cb360b07",
-        clientSecret: clientSecret.value
-    }
-};
 
 // Create msal application object
 const cca = new msalNode.ConfidentialClientApplication(config);
@@ -107,30 +98,38 @@ app.get('/', (req, res)=>{
 })
 
 app.get('/blobstorage', validateJwt, async (req, res) => {
-    const scopes: Array<string> = ["access_as_reader"];
-    if(!confirmRequestHasTheRightScope(scopes)){
-        res.status(403).send("Missing or invalid scopes");
+    if(!confirmRequestHasTheRightScope(readOnlyScope)){
+        res.status(403).send("Missing or invalid readOnlyScope");
     };
     var data = await getStorageData();
     res.send(data);
 });
 
-app.get('/cosmos', async (req, res) => {
+app.get('/cosmos', validateJwt, async (req, res) => {
+    if(!confirmRequestHasTheRightScope(cosmosScope)){
+        res.status(403).send("Missing or invalid readOnlyScope");
+    };
     const data = await getCosmosData();
     res.send(data);
 });
 
 app.get('/volcano',validateJwt, async(req, res)=> {
+    if(!confirmRequestHasTheRightScope(cosmosScope)){
+        res.status(403).send("Missing or invalid readOnlyScope");
+    };
     const data = await getVolcanoDataByName(req.query.volcanoname.toString());
     res.send(data);
 });
 
 app.get("/graph", validateJwt, (req, res)=>{
+    if(!confirmRequestHasTheRightScope(readOnlyScope)){
+        res.status(403).send("Missing or invalid readOnlyScope");
+    };
     const authHeader = req.headers.authorization;
 
-    const oboRequest = {
+    const oboRequest:OnBehalfOfRequest = {
         oboAssertion: authHeader.split(' ')[1],
-        scopes: ["user.read"],
+        scopes: ["user.read"]
     }
 
     cca.acquireTokenOnBehalfOf(oboRequest).then((response) => {
@@ -141,8 +140,6 @@ app.get("/graph", validateJwt, (req, res)=>{
         res.status(500).send(error);
     });
 });
-
-app.listen(SERVER_PORT, () => console.log(`Secure Node Web API listening on port ${SERVER_PORT}!`))
 
 const getGraphData= (accessToken:string, callback:any) => {
     const options = {
@@ -213,3 +210,5 @@ async function getClientSecretFromKV() {
     const client = new SecretClient(keyVaultEndpoint, credential);
     return await client.getSecret("clientSecret");
 };
+
+app.listen(SERVER_PORT, () => console.log(`Secure Node Web API listening on port ${SERVER_PORT}!`))
